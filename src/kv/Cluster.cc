@@ -9,7 +9,7 @@ namespace kv
 {
 void Cluster::splitRegion(const std::string & split_key)
 {
-    Backoffer bo(splitRegionBackoff);
+    Backoffer bo = newBackoffer(splitRegionBackoff);
     auto loc = region_cache->locateKey(bo, split_key);
     RegionClient client(this, loc.region);
     kvrpcpb::SplitRegionRequest req;

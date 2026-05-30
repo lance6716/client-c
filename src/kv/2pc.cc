@@ -85,7 +85,7 @@ void TwoPhaseCommitter::execute()
             min_commit_ts = cluster->pd_client->getTS();
             calculateMaxCommitTS();
         }
-        Backoffer prewrite_bo(prewriteMaxBackoff);
+        Backoffer prewrite_bo = cluster->newBackoffer(prewriteMaxBackoff);
         prewriteKeys(prewrite_bo, keys);
         if (use_async_commit)
         {
@@ -95,7 +95,7 @@ void TwoPhaseCommitter::execute()
             std::thread([self]() {
                 try
                 {
-                    Backoffer commit_bo(commitMaxBackoff);
+                    Backoffer commit_bo = self->cluster->newBackoffer(commitMaxBackoff);
                     self->commitKeys(commit_bo, self->keys);
                 }
                 catch (Exception & e)
@@ -111,7 +111,7 @@ void TwoPhaseCommitter::execute()
 
         commit_ts = cluster->pd_client->getTS();
         // TODO: check expired
-        Backoffer commit_bo(commitMaxBackoff);
+        Backoffer commit_bo = cluster->newBackoffer(commitMaxBackoff);
         commitKeys(commit_bo, keys);
 
         ttl_manager.close();
@@ -132,7 +132,7 @@ void TwoPhaseCommitter::execute()
         {
             try
             {
-                Backoffer cleanup_bo(cleanupMaxBackoff);
+                Backoffer cleanup_bo = cluster->newBackoffer(cleanupMaxBackoff);
                 cleanupKeys(cleanup_bo, keys);
             }
             catch (Exception & cleanup_error)
@@ -401,7 +401,7 @@ void TTLManager::keepAlive(TwoPhaseCommitterPtr committer)
         std::this_thread::sleep_for(std::chrono::milliseconds(managedLockTTL / 2));
 
         // TODO: Checks maximum lifetime for the TTLManager
-        Backoffer bo(pessimisticLockMaxBackoff);
+        Backoffer bo = committer->cluster->newBackoffer(pessimisticLockMaxBackoff);
         uint64_t now = committer->cluster->oracle->getLowResolutionTimestamp();
         uint64_t uptime = pd::extractPhysical(now) - pd::extractPhysical(committer->start_ts);
         uint64_t new_ttl = uptime + managedLockTTL;

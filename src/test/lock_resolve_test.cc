@@ -5,6 +5,9 @@
 #include <pingcap/kv/Snapshot.h>
 #include <pingcap/kv/Txn.h>
 
+#include <stdexcept>
+#include <vector>
+
 #include "mock_tikv.h"
 #include "test_helper.h"
 
@@ -123,6 +126,51 @@ TEST_F(TestWithLockResolve, testResolveLockGet)
     }
 }
 
+
+TEST(BackofferObserverTest, RecordsEventsAndDoesNotChangeRetryBehavior)
+{
+    std::vector<BackoffEvent> events;
+    auto observer = [&events](const BackoffEvent & event) {
+        events.push_back(event);
+    };
+
+    Backoffer bo(kv::copNextMaxBackoff, 0, observer);
+    bo.backoffWithMaxSleep(boRegionMiss, 0, Exception("region miss", RegionUnavailable));
+
+    ASSERT_EQ(events.size(), 1);
+    EXPECT_EQ(events[0].type, boRegionMiss);
+    EXPECT_EQ(events[0].sleep_ms, 0);
+    EXPECT_EQ(events[0].total_sleep_ms, 0);
+    EXPECT_EQ(events[0].max_sleep_ms, static_cast<size_t>(kv::copNextMaxBackoff));
+    EXPECT_EQ(events[0].max_sleep_time_ms, 0);
+    EXPECT_EQ(events[0].attempts, 1);
+    EXPECT_EQ(events[0].error_code, RegionUnavailable);
+    EXPECT_EQ(events[0].error_message, "region miss");
+    EXPECT_FALSE(events[0].max_sleep_exceeded);
+
+    auto cloned = bo.clone();
+    cloned.backoffWithMaxSleep(boRegionMiss, 0, Exception("cloned retry", RegionUnavailable));
+    ASSERT_EQ(events.size(), 2);
+    EXPECT_EQ(events[1].type, boRegionMiss);
+    EXPECT_EQ(events[1].attempts, 2);
+    EXPECT_EQ(events[1].error_message, "cloned retry");
+
+    Backoffer throwing_observer(kv::copNextMaxBackoff, 0, [](const BackoffEvent &) {
+        throw std::runtime_error("observer failure must be ignored");
+    });
+    EXPECT_NO_THROW(throwing_observer.backoffWithMaxSleep(
+        boRegionMiss, 0, Exception("ignored observer", RegionUnavailable)));
+
+    std::vector<BackoffEvent> limited_events;
+    Backoffer limited(1, 0, [&limited_events](const BackoffEvent & event) {
+        limited_events.push_back(event);
+    });
+    EXPECT_THROW(limited.backoff(boRegionMiss, Exception("retry limit", RegionUnavailable)), Exception);
+    ASSERT_EQ(limited_events.size(), 1);
+    EXPECT_EQ(limited_events[0].type, boRegionMiss);
+    EXPECT_GT(limited_events[0].sleep_ms, 0);
+    EXPECT_TRUE(limited_events[0].max_sleep_exceeded);
+}
 
 TEST_F(TestWithLockResolve, testResolveLockBase)
 {

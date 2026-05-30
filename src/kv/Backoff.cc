@@ -62,11 +62,42 @@ void Backoffer::backoffWithMaxSleep(pingcap::kv::BackoffType tp, int max_sleep_t
         bo = newBackoff(tp);
         backoff_map[tp] = bo;
     }
-    total_sleep += bo->sleep(max_sleep_time);
-    if (max_sleep > 0 && total_sleep > max_sleep)
+    const int sleep_ms = bo->sleep(max_sleep_time);
+    total_sleep += sleep_ms;
+    const bool max_sleep_exceeded = max_sleep > 0 && total_sleep > max_sleep;
+    notifyObserver(BackoffEvent{
+        tp,
+        sleep_ms,
+        total_sleep,
+        max_sleep,
+        max_sleep_time,
+        bo->attempts,
+        exc.code(),
+        exc.message(),
+        max_sleep_exceeded,
+    });
+    if (max_sleep_exceeded)
     {
         // TODO:: Should Record all the errors!!
         throw exc;
+    }
+}
+
+void Backoffer::notifyObserver(const BackoffEvent & event) const
+{
+    if (!observer)
+    {
+        return;
+    }
+
+    try
+    {
+        observer(event);
+    }
+    catch (...)
+    {
+        // Retry observers are for metrics/telemetry only and must not change
+        // the client retry behavior.
     }
 }
 

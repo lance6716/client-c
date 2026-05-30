@@ -6,7 +6,7 @@ namespace kv
 {
 void Scanner::next()
 {
-    Backoffer bo(scanMaxBackoff);
+    Backoffer bo = snap.cluster->newBackoffer(scanMaxBackoff);
     if (!valid)
     {
         throw Exception("the scanner is invalid", LogicalError);

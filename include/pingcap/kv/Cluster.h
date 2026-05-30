@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pingcap/Config.h>
+#include <pingcap/kv/Backoff.h>
 #include <pingcap/common/FixedThreadPool.h>
 #include <pingcap/common/MPPProber.h>
 #include <pingcap/kv/LockResolver.h>
@@ -9,6 +10,8 @@
 #include <pingcap/pd/CodecClient.h>
 #include <pingcap/pd/MockPDClient.h>
 #include <pingcap/pd/Oracle.h>
+
+#include <utility>
 
 namespace pingcap
 {
@@ -31,6 +34,7 @@ struct Cluster
 
     std::unique_ptr<pingcap::common::FixedThreadPool> thread_pool;
     std::unique_ptr<common::MPPProber> mpp_prober;
+    BackoffObserver backoff_observer;
 
     Cluster()
         : pd_client(std::make_shared<pd::MockPDClient>())
@@ -58,6 +62,16 @@ struct Cluster
     {
         pd_client->update(pd_addrs, config);
         rpc_client->update(config);
+    }
+
+    void setBackoffObserver(BackoffObserver observer)
+    {
+        backoff_observer = std::move(observer);
+    }
+
+    Backoffer newBackoffer(size_t max_sleep, size_t total_sleep = 0) const
+    {
+        return Backoffer(max_sleep, total_sleep, backoff_observer);
     }
 
     // TODO: When the cluster is closed, we should release all the resources

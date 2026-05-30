@@ -181,7 +181,7 @@ bool reverseScanFallback(
 
 kvrpcpb::MvccInfo Snapshot::mvccGet(const std::string & key)
 {
-    Backoffer bo(GetMaxBackoff);
+    Backoffer bo = cluster->newBackoffer(GetMaxBackoff);
     return mvccGet(bo, key);
 }
 
@@ -224,7 +224,7 @@ kvrpcpb::MvccInfo Snapshot::mvccGet(Backoffer & bo, const std::string & key)
 
 std::string Snapshot::Get(const std::string & key)
 {
-    Backoffer bo(GetMaxBackoff);
+    Backoffer bo = cluster->newBackoffer(GetMaxBackoff);
     return Get(bo, key);
 }
 
@@ -282,7 +282,7 @@ std::string Snapshot::Get(Backoffer & bo, const std::string & key)
 
 ScanResult Snapshot::ScanOnce(const ScanOptions & options)
 {
-    Backoffer bo(scanMaxBackoff);
+    Backoffer bo = cluster->newBackoffer(scanMaxBackoff);
     return ScanOnce(bo, options);
 }
 

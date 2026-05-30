@@ -3,10 +3,13 @@
 #include <pingcap/Exception.h>
 
 #include <cmath>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <string>
 #include <thread>
+#include <utility>
 
 namespace pingcap
 {
@@ -104,20 +107,37 @@ constexpr int pessimisticLockMaxBackoff = 20000;
 
 using BackoffPtr = std::shared_ptr<Backoff>;
 
+struct BackoffEvent
+{
+    BackoffType type;
+    int sleep_ms;
+    size_t total_sleep_ms;
+    size_t max_sleep_ms;
+    int max_sleep_time_ms;
+    int attempts;
+    int error_code;
+    std::string error_message;
+    bool max_sleep_exceeded;
+};
+
+using BackoffObserver = std::function<void(const BackoffEvent &)>;
+
 struct Backoffer
 {
     size_t max_sleep; // ms
     size_t total_sleep; // ms
     std::map<BackoffType, BackoffPtr> backoff_map;
+    BackoffObserver observer;
 
-    explicit Backoffer(size_t max_sleep_, size_t total_sleep_ = 0)
+    explicit Backoffer(size_t max_sleep_, size_t total_sleep_ = 0, BackoffObserver observer_ = {})
         : max_sleep(max_sleep_)
         , total_sleep(total_sleep_)
+        , observer(std::move(observer_))
     {}
 
     Backoffer clone() const
     {
-        Backoffer res(max_sleep, total_sleep);
+        Backoffer res(max_sleep, total_sleep, observer);
         for (auto && [k, v] : backoff_map)
         {
             res.backoff_map.emplace(k, new Backoff(*v));
@@ -128,8 +148,13 @@ struct Backoffer
     Backoffer(const Backoffer &) = delete;
     Backoffer(Backoffer &&) = default;
 
+    void setObserver(BackoffObserver observer_) { observer = std::move(observer_); }
+
     void backoff(BackoffType tp, const Exception & exc);
     void backoffWithMaxSleep(BackoffType tp, int max_sleep_time, const Exception & exc);
+
+private:
+    void notifyObserver(const BackoffEvent & event) const;
 };
 
 } // namespace kv
