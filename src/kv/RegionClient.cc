@@ -4,6 +4,45 @@ namespace pingcap
 {
 namespace kv
 {
+namespace
+{
+std::string defaultRegionMissMessage(const RegionVerID & region_id)
+{
+    return "injected region miss, region_id is: " + std::to_string(region_id.id);
+}
+
+std::string defaultStoreUnavailableMessage(RPCContextPtr rpc_ctx)
+{
+    return "injected unavailable store, region_id is: " + std::to_string(rpc_ctx->region.id)
+        + " store_id is: " + std::to_string(rpc_ctx->peer.store_id());
+}
+} // namespace
+
+bool RegionClient::handleRegionErrorInjection(Backoffer & bo, RPCContextPtr rpc_ctx, const RegionErrorInjection & injection) const
+{
+    switch (injection.kind)
+    {
+    case RegionErrorInjectionKind::None:
+        return false;
+    case RegionErrorInjectionKind::RegionError:
+        log->warning("region_id " + region_id.toString() + " injected error: " + injection.region_error.DebugString());
+        onRegionError(bo, rpc_ctx, injection.region_error);
+        return true;
+    case RegionErrorInjectionKind::RegionMiss:
+        bo.backoff(boRegionMiss,
+                   Exception(injection.message.empty() ? defaultRegionMissMessage(region_id) : injection.message,
+                             RegionUnavailable));
+        return true;
+    case RegionErrorInjectionKind::StoreUnavailable:
+        cluster->region_cache->dropStore(rpc_ctx->peer.store_id());
+        bo.backoff(boRegionMiss,
+                   Exception(injection.message.empty() ? defaultStoreUnavailableMessage(rpc_ctx) : injection.message,
+                             StoreNotReady));
+        return true;
+    }
+    return false;
+}
+
 void RegionClient::onRegionError(Backoffer & bo, RPCContextPtr rpc_ctx, const errorpb::Error & err) const
 {
     if (err.has_not_leader())

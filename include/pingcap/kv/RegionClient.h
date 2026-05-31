@@ -64,6 +64,18 @@ struct RegionClient
                 auto s = store_id_blocklist != nullptr ? ", store_filter_size=" + std::to_string(store_id_blocklist->size()) + "." : std::string(".");
                 throw Exception("Region epoch not match after retries: Region " + region_id.toString() + " not in region cache" + s, RegionEpochNotMatch);
             }
+            auto injection = cluster->maybeInjectRegionError(RegionErrorInjectionContext{
+                T::errMsg(),
+                region_id,
+                store_type,
+                ctx->peer.store_id(),
+                ctx->addr,
+                false,
+            });
+            if (handleRegionErrorInjection(bo, ctx, injection))
+            {
+                continue;
+            }
             RpcCall<T> rpc(cluster->rpc_client, ctx->addr);
             rpc.setRequestCtx(req, ctx, cluster->api_version);
 
@@ -163,6 +175,18 @@ struct RegionClient
                 // RPC by returning RegionError directly.
                 throw Exception("Region epoch not match after retries: Region " + region_id.toString() + " not in region cache.", RegionEpochNotMatch);
             }
+            auto injection = cluster->maybeInjectRegionError(RegionErrorInjectionContext{
+                T::errMsg(),
+                region_id,
+                store_type,
+                ctx->peer.store_id(),
+                ctx->addr,
+                true,
+            });
+            if (handleRegionErrorInjection(bo, ctx, injection))
+            {
+                continue;
+            }
 
             auto stream_reader = std::make_unique<StreamReader<RESP>>();
             RpcCall<T> rpc(cluster->rpc_client, ctx->addr);
@@ -207,6 +231,8 @@ struct RegionClient
     }
 
 protected:
+    bool handleRegionErrorInjection(Backoffer & bo, RPCContextPtr rpc_ctx, const RegionErrorInjection & injection) const;
+
     void onRegionError(Backoffer & bo, RPCContextPtr rpc_ctx, const errorpb::Error & err) const;
 
     // Normally, it happens when machine down or network partition between tidb and kv or process crash.

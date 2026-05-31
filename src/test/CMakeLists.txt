@@ -12,6 +12,7 @@ list(APPEND test_libs
 
 add_executable(kv_client_ut
     io_or_region_error_get_test.cc
+    region_error_injection_test.cc
     region_split_test.cc
     region_cache_test.cc
     lock_resolve_test.cc

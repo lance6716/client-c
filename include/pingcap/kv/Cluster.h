@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kvproto/errorpb.pb.h>
 #include <pingcap/Config.h>
 #include <pingcap/kv/Backoff.h>
 #include <pingcap/common/FixedThreadPool.h>
@@ -18,6 +19,60 @@ namespace pingcap
 namespace kv
 {
 constexpr int oracle_update_interval = 2000;
+
+enum class RegionErrorInjectionKind
+{
+    None,
+    RegionError,
+    RegionMiss,
+    StoreUnavailable,
+};
+
+struct RegionErrorInjection
+{
+    RegionErrorInjectionKind kind = RegionErrorInjectionKind::None;
+    errorpb::Error region_error;
+    std::string message;
+
+    static RegionErrorInjection none() { return {}; }
+
+    static RegionErrorInjection regionError(const errorpb::Error & err)
+    {
+        RegionErrorInjection injection;
+        injection.kind = RegionErrorInjectionKind::RegionError;
+        injection.region_error = err;
+        return injection;
+    }
+
+    static RegionErrorInjection regionMiss(std::string message_ = {})
+    {
+        RegionErrorInjection injection;
+        injection.kind = RegionErrorInjectionKind::RegionMiss;
+        injection.message = std::move(message_);
+        return injection;
+    }
+
+    static RegionErrorInjection storeUnavailable(std::string message_ = {})
+    {
+        RegionErrorInjection injection;
+        injection.kind = RegionErrorInjectionKind::StoreUnavailable;
+        injection.message = std::move(message_);
+        return injection;
+    }
+};
+
+struct RegionErrorInjectionContext
+{
+    const char * rpc_name = "";
+    RegionVerID region_id;
+    StoreType store_type = StoreType::TiKV;
+    uint64_t store_id = 0;
+    std::string store_addr;
+    bool is_stream = false;
+};
+
+using RegionErrorInjector = std::function<RegionErrorInjection(const RegionErrorInjectionContext &)>;
+
 // Cluster represents a tikv+pd cluster.
 
 struct Cluster
@@ -35,6 +90,7 @@ struct Cluster
     std::unique_ptr<pingcap::common::FixedThreadPool> thread_pool;
     std::unique_ptr<common::MPPProber> mpp_prober;
     BackoffObserver backoff_observer;
+    RegionErrorInjector region_error_injector;
 
     Cluster()
         : pd_client(std::make_shared<pd::MockPDClient>())
@@ -67,6 +123,23 @@ struct Cluster
     void setBackoffObserver(BackoffObserver observer)
     {
         backoff_observer = std::move(observer);
+    }
+
+    void setRegionErrorInjector(RegionErrorInjector injector)
+    {
+        region_error_injector = std::move(injector);
+    }
+
+    void clearRegionErrorInjector()
+    {
+        region_error_injector = {};
+    }
+
+    RegionErrorInjection maybeInjectRegionError(const RegionErrorInjectionContext & ctx) const
+    {
+        if (!region_error_injector)
+            return RegionErrorInjection::none();
+        return region_error_injector(ctx);
     }
 
     Backoffer newBackoffer(size_t max_sleep, size_t total_sleep = 0) const
