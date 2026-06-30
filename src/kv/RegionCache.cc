@@ -511,23 +511,69 @@ bool RegionCache::updateLeader(const RegionVerID & region_id, const metapb::Peer
     return true;
 }
 
-void RegionCache::onRegionStale(Backoffer & /*bo*/, RPCContextPtr ctx, const errorpb::EpochNotMatch & stale_epoch)
+bool RegionCache::onRegionStale(Backoffer & bo, RPCContextPtr ctx, const errorpb::EpochNotMatch & stale_epoch)
 {
-    log->information("region stale for region_ver_id=" + ctx->region.toString());
+    log->information("region stale for region_ver_id=" + ctx->region.toString()
+                     + ", current_regions=" + std::to_string(stale_epoch.current_regions_size()));
 
-    dropRegion(ctx->region);
+    if (stale_epoch.current_regions_size() == 0)
+    {
+        dropRegion(ctx->region);
+        return false;
+    }
 
+    for (const auto & meta : stale_epoch.current_regions())
+    {
+        const auto & epoch = meta.region_epoch();
+        if (meta.id() == ctx->region.id && (epoch.conf_ver() < ctx->region.conf_ver || epoch.version() < ctx->region.ver))
+        {
+            bo.backoff(boRegionMiss,
+                       Exception("region epoch is ahead of tikv, region_ver_id=" + ctx->region.toString()
+                                     + ", current_region=" + meta.ShortDebugString(),
+                                 RegionEpochNotMatch));
+            return true;
+        }
+    }
+
+    const uint64_t init_leader_store_id = ctx->peer.store_id();
+    bool need_drop_old = true;
+    std::vector<RegionPtr> current_regions;
     for (int i = 0; i < stale_epoch.current_regions_size(); i++)
     {
         auto meta = stale_epoch.current_regions(i);
-        if (auto * pd = static_cast<pd::CodecClient *>(pd_client.get()))
+        if (auto * pd = dynamic_cast<pd::CodecClient *>(pd_client.get()))
         {
             pd->processRegionResult(meta);
         }
+        if (meta.peers_size() == 0)
+        {
+            log->warning("skip stale region with no peer, region_id=" + std::to_string(meta.id()));
+            continue;
+        }
         RegionPtr region = std::make_shared<Region>(meta, meta.peers(0));
-        region->switchPeer(ctx->peer.id());
+        if (region->verID() == ctx->region)
+        {
+            need_drop_old = false;
+        }
+        if (!region->switchPeerByStoreID(init_leader_store_id))
+        {
+            log->warning("failed to initialize stale region leader by store, old_region_ver_id=" + ctx->region.toString()
+                         + ", new_region_ver_id=" + region->verID().toString()
+                         + ", store_id=" + std::to_string(init_leader_store_id));
+        }
+        current_regions.push_back(region);
+    }
+
+    if (need_drop_old)
+    {
+        dropRegion(ctx->region);
+    }
+
+    for (auto & region : current_regions)
+    {
         insertRegionToCache(region);
     }
+    return false;
 }
 
 std::pair<std::unordered_map<RegionVerID, std::vector<std::string>>, RegionVerID>

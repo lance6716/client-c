@@ -209,7 +209,10 @@ void TwoPhaseCommitter::prewriteSingleBatch(Backoffer & bo, const BatchKeys & ba
         catch (Exception & e)
         {
             // Region Error.
-            bo.backoff(boRegionMiss, e);
+            if (e.code() != RegionEpochNotMatch)
+            {
+                bo.backoff(boRegionMiss, e);
+            }
             prewriteKeys(bo, batch.keys);
             return;
         }
@@ -299,7 +302,10 @@ void TwoPhaseCommitter::commitSingleBatch(Backoffer & bo, const BatchKeys & batc
                 commit_result_undetermined = true;
                 throw;
             }
-            bo.backoff(boRegionMiss, e);
+            if (e.code() != RegionEpochNotMatch)
+            {
+                bo.backoff(boRegionMiss, e);
+            }
             commitKeys(bo, batch.keys);
             return;
         }

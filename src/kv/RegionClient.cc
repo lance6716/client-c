@@ -85,8 +85,11 @@ void RegionClient::onRegionError(Backoffer & bo, RPCContextPtr rpc_ctx, const er
 
     if (err.has_epoch_not_match())
     {
-        cluster->region_cache->onRegionStale(bo, rpc_ctx, err.epoch_not_match());
-        // Epoch not match should not retry, throw exception directly !!
+        if (cluster->region_cache->onRegionStale(bo, rpc_ctx, err.epoch_not_match()))
+        {
+            return;
+        }
+        // Range changes need the caller to regroup keys by region.
         throw Exception("Region epoch not match for region " + rpc_ctx->region.toString() + ".", RegionEpochNotMatch);
     }
 

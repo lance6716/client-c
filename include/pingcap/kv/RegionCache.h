@@ -138,6 +138,19 @@ struct Region
         return false;
     }
 
+    bool switchPeerByStoreID(uint64_t store_id)
+    {
+        for (const auto & peer : meta.peers())
+        {
+            if (peer.store_id() == store_id)
+            {
+                leader_peer = peer;
+                return true;
+            }
+        }
+        return false;
+    }
+
     inline void initTTL()
     {
         int64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -235,7 +248,7 @@ public:
 
     void onSendReqFailForBatchRegions(const std::vector<RegionVerID> & region_ids, uint64_t store_id);
 
-    void onRegionStale(Backoffer & bo, RPCContextPtr ctx, const errorpb::EpochNotMatch & stale_epoch);
+    bool onRegionStale(Backoffer & bo, RPCContextPtr ctx, const errorpb::EpochNotMatch & stale_epoch);
 
     RegionPtr getRegionByID(Backoffer & bo, const RegionVerID & id);
 
